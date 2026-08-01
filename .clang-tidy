@@ -53,7 +53,7 @@ CheckOptions:
   readability-identifier-naming.ConstexprVariableCase: CamelCase
 
   # Enum values and macros: UNKNOWN, INTEGRAL_MOTIONS_ASSERT
-  readability-identifier-naming.EnumConstantCase: UPPER_CASE
+  readability-identifier-naming.EnumConstantCase: CamelCase
   readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
 
   # Namespaces: IntegralMotions::Tracing
