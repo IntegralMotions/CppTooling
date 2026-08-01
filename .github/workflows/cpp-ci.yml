@@ -2,7 +2,18 @@ name: CI
 
 on:
   workflow_call:
-  
+    inputs:
+      ignore_tidy:
+        description: Paths excluded from clang-tidy
+        required: false
+        type: string
+        default: 'tests/**|build/**'
+      ignore_format:
+        description: Paths excluded from clang-format
+        required: false
+        type: string
+        default: 'tests/**|build/**'
+
 jobs:
   build-and-test:
     name: ${{ matrix.os }} / ${{ matrix.build_type }}
@@ -37,9 +48,8 @@ jobs:
           files-changed-only: false
           file-annotations: true
           thread-comments: ${{ github.event_name == 'pull_request' && 'update' }}
-
-          ignore-tidy: 'tests/**|build'
-          ignore-format: 'tests/**|build'
+          ignore-tidy: ${{ inputs.ignore_tidy }}
+          ignore-format: ${{ inputs.ignore_format }}
 
       - name: Fail on lint issues
         if: |
