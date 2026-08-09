@@ -42,8 +42,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          style: 'file'          
-          tidy-checks: ''        
+          version: '22'
+          style: 'file'
+          tidy-checks: ''
           database: build
           files-changed-only: false
           file-annotations: true
