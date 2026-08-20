@@ -1,0 +1,16 @@
+PROJECT_DIR := $(CURDIR)
+BUILD_DIR := $(PROJECT_DIR)/build
+
+CMAKE ?= cube-cmake
+GENERATOR := Ninja
+TOOLCHAIN_FILE := $(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
+BUILD_TYPE ?= Debug
+
+CLANGD_FILE := $(PROJECT_DIR)/.clangd
+CLANGD_IGNORE_HEADERS := stm32h7xx_hal[.]h main[.]h
+
+TOOLING_VERSION := main
+TOOLING_REPOSITORY ?= IntegralMotions/CppTooling
+TOOLING_URL := https://raw.githubusercontent.com/$(TOOLING_REPOSITORY)/$(TOOLING_VERSION)
+
+include STM32.mk
