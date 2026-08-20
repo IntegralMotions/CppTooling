@@ -1,0 +1,247 @@
+inputs:
+  projects:
+    description: JSON array of STM32 project directories
+    required: false
+    type: string
+    default: '["DualMCS", "ExpansionBoard"]'
+  runner:
+    description: GitHub-hosted runner label
+    required: false
+    type: string
+    default: ubuntu-24.04
+  cmake_version:
+    description: CMake version used to configure the projects
+    required: false
+    type: string
+    default: 3.28.6
+  arm_toolchain_version:
+    description: Arm GNU Toolchain release
+    required: false
+    type: string
+    default: 13.3.rel1
+  clang_version:
+    description: clang-format and clang-tidy major version
+    required: false
+    type: string
+    default: '22'
+  debug_target:
+    description: Make target for the Debug build
+    required: false
+    type: string
+    default: debug
+  release_target:
+    description: Make target for the Release build
+    required: false
+    type: string
+    default: release
+  make_arguments:
+    description: Additional arguments passed to both make commands
+    required: false
+    type: string
+    default: CMAKE=cmake
+  release_database:
+    description: Compilation database path relative to each project
+    required: false
+    type: string
+    default: build/Release
+  lint_paths:
+    description: Pipe-separated source paths relative to each project
+    required: false
+    type: string
+    default: 'Core/Inc/App|Core/Src/App|Core/Inc/bldc|Core/Src/bldc'
+  extra_tidy_args:
+    description: Additional compiler arguments passed to clang-tidy
+    required: false
+    type: string
+    default: ''
+  files_changed_only:
+    description: Only lint files changed by the pull request
+    required: false
+    type: boolean
+    default: false
+  thread_comments:
+    description: cpp-linter thread-comments setting
+    required: false
+    type: string
+    default: update
+secrets:
+  STM32_CUBE_CLT_DEB_URL:
+    description: Optional URL for the STM32Cube command-line tools Debian package
+    required: false
+  STM32_CUBE_H7_ZIP_URL:
+    description: Optional URL for the STM32CubeH7 package archive
+    required: false
+jobs: build:
+
+name: Build ${{ matrix.project }}
+runs-on: ${{ inputs.runner }}
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+strategy:
+  fail-fast: false
+  matrix:
+    project: ${{ fromJSON(inputs.projects) }}
+
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
+    with:
+      submodules: recursive
+
+  - name: Install build tools
+    env:
+      CMAKE_VERSION: ${{ inputs.cmake_version }}
+      ARM_TOOLCHAIN_VERSION: ${{ inputs.arm_toolchain_version }}
+      STM32_CUBE_CLT_DEB_URL: ${{ secrets.STM32_CUBE_CLT_DEB_URL }}
+      STM32_CUBE_H7_ZIP_URL: ${{ secrets.STM32_CUBE_H7_ZIP_URL }}
+    run: |
+      set -euxo pipefail
+
+      if command -v sudo >/dev/null 2>&1; then
+        SUDO=sudo
+      else
+        SUDO=
+      fi
+
+      $SUDO apt-get update
+      $SUDO apt-get install -y \
+        ca-certificates \
+        curl \
+        make \
+        ninja-build \
+        unzip \
+        wget \
+        xz-utils
+
+      wget --quiet \
+        "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.sh" \
+        -O /tmp/cmake-installer.sh
+      chmod +x /tmp/cmake-installer.sh
+      $SUDO /tmp/cmake-installer.sh --skip-license --prefix=/usr/local
+
+      ARM_TOOLCHAIN_DIR="/opt/arm-gnu-toolchain-${ARM_TOOLCHAIN_VERSION}-x86_64-arm-none-eabi"
+      ARM_TOOLCHAIN_URL="https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_TOOLCHAIN_VERSION}/binrel/arm-gnu-toolchain-${ARM_TOOLCHAIN_VERSION}-x86_64-arm-none-eabi.tar.xz"
+
+      if [ ! -x "$ARM_TOOLCHAIN_DIR/bin/arm-none-eabi-gcc" ]; then
+        curl -fsSL "$ARM_TOOLCHAIN_URL" -o /tmp/arm-gnu-toolchain.tar.xz
+        $SUDO mkdir -p /opt
+        $SUDO tar -xJf /tmp/arm-gnu-toolchain.tar.xz -C /opt
+      fi
+
+      echo "$ARM_TOOLCHAIN_DIR/bin" >> "$GITHUB_PATH"
+
+      if [ -n "$STM32_CUBE_CLT_DEB_URL" ]; then
+        curl -fsSL "$STM32_CUBE_CLT_DEB_URL" -o /tmp/stm32cubeclt.deb
+        $SUDO apt-get install -y /tmp/stm32cubeclt.deb
+      fi
+
+      if [ -n "$STM32_CUBE_H7_ZIP_URL" ]; then
+        $SUDO mkdir -p /opt/st/stm32cube
+        curl -fsSL "$STM32_CUBE_H7_ZIP_URL" -o /tmp/stm32cubeh7.zip
+        $SUDO unzip -q /tmp/stm32cubeh7.zip -d /opt/st/stm32cube
+      fi
+
+  - name: Show tool versions
+    run: |
+      set -euxo pipefail
+      cmake --version
+      ninja --version
+      arm-none-eabi-gcc --version
+      arm-none-eabi-g++ --version
+      if command -v STM32_Programmer_CLI >/dev/null 2>&1; then
+        STM32_Programmer_CLI --version
+      fi
+      if command -v STM32CubeMX >/dev/null 2>&1; then
+        STM32CubeMX --version || true
+      fi
+
+  - name: Build Debug
+    working-directory: ${{ matrix.project }}
+    env:
+      BUILD_TARGET: ${{ inputs.debug_target }}
+      MAKE_ARGUMENTS: ${{ inputs.make_arguments }}
+    run: |
+      set -euxo pipefail
+      make clean
+      make "$BUILD_TARGET" $MAKE_ARGUMENTS
+
+  - name: Build Release
+    working-directory: ${{ matrix.project }}
+    env:
+      BUILD_TARGET: ${{ inputs.release_target }}
+      MAKE_ARGUMENTS: ${{ inputs.make_arguments }}
+    run: |
+      set -euxo pipefail
+      make clean
+      make "$BUILD_TARGET" $MAKE_ARGUMENTS
+
+  - name: Detect Arm C++ include paths
+    id: arm_includes
+    env:
+      EXTRA_TIDY_ARGS: ${{ inputs.extra_tidy_args }}
+    run: |
+      set -euxo pipefail
+
+      ARM_GXX="$(command -v arm-none-eabi-g++)"
+      "$ARM_GXX" -v -E -x c++ /dev/null 2>&1 | tee /tmp/arm-gxx-includes.txt
+
+      ARGS="$EXTRA_TIDY_ARGS"
+      while IFS= read -r include_path; do
+        [ -n "$include_path" ] || continue
+        ARGS="$ARGS -isystem=$include_path"
+      done < <(
+        awk '
+          /#include <...> search starts here:/ { found=1; next }
+          /End of search list./ { found=0 }
+          found {
+            gsub(/^[ \t]+|[ \t]+$/, "", $0)
+            if ($0 != "" && $0 !~ /^(framework directory)/) print
+          }
+        ' /tmp/arm-gxx-includes.txt
+      )
+
+      echo "args=${ARGS# }" >> "$GITHUB_OUTPUT"
+
+  - name: Prepare lint paths
+    id: lint_paths
+    env:
+      PROJECT: ${{ matrix.project }}
+      LINT_PATHS: ${{ inputs.lint_paths }}
+    run: |
+      set -euxo pipefail
+
+      IGNORE='*'
+      IFS='|' read -ra PATHS <<< "$LINT_PATHS"
+      for path in "${PATHS[@]}"; do
+        [ -n "$path" ] || continue
+        IGNORE="$IGNORE|!$PROJECT/$path"
+      done
+
+      echo "ignore=$IGNORE" >> "$GITHUB_OUTPUT"
+
+  - name: Run cpp-linter
+    uses: cpp-linter/cpp-linter-action@v2.19.0
+    id: linter
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    with:
+      version: ${{ inputs.clang_version }}
+      style: file
+      tidy-checks: ''
+      database: ${{ matrix.project }}/${{ inputs.release_database }}
+      file-annotations: true
+      files-changed-only: ${{ inputs.files_changed_only }}
+      thread-comments: ${{ inputs.thread_comments }}
+      ignore-format: ${{ steps.lint_paths.outputs.ignore }}
+      ignore-tidy: ${{ steps.lint_paths.outputs.ignore }}
+      extra-args: ${{ steps.arm_includes.outputs.args }}
+
+  - name: Fail on lint issues
+    if: |
+      steps.linter.outputs.clang-format-checks-failed > 0 ||
+      steps.linter.outputs.clang-tidy-checks-failed > 0
+    run: exit 1
