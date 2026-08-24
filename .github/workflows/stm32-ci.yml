@@ -70,6 +70,9 @@ on:
         default: update
 
     secrets:
+      DEPENDENCY_TOKEN:
+        description: Token used to clone private GitHub dependencies
+        required: true
       STM32_CUBE_CLT_DEB_URL:
         description: Optional URL for the STM32Cube command-line tools Debian package
         required: false
@@ -97,6 +100,24 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Configure access to private dependencies
+        env:
+          DEPENDENCY_TOKEN: ${{ secrets.DEPENDENCY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # actions/checkout configures the current repository's GITHUB_TOKEN
+          # as an HTTP authorization header. Remove it so Git can use the
+          # dependency token for IntegralCoreUtilities.
+          git config --local --unset-all \
+            http.https://github.com/.extraheader || true
+
+          git config --global credential.helper store
+
+          printf 'https://x-access-token:%s@github.com\n' \
+            "$DEPENDENCY_TOKEN" > "$HOME/.git-credentials"
+
+          chmod 600 "$HOME/.git-credentials"
 
       - name: Install build tools
         env:
@@ -266,3 +287,7 @@ jobs:
           steps.linter.outputs.clang-format-checks-failed > 0 ||
           steps.linter.outputs.clang-tidy-checks-failed > 0
         run: exit 1
+
+      - name: Remove private dependency credentials
+        if: always()
+        run: rm -f "$HOME/.git-credentials"
