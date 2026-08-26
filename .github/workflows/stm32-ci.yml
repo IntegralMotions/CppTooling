@@ -219,24 +219,23 @@ jobs:
           set -euxo pipefail
 
           ARM_GXX="$(command -v arm-none-eabi-g++)"
-          ARM_SYSROOT="$("$ARM_GXX" -print-sysroot)"
+          ARM_SYSROOT="$(realpath "$("$ARM_GXX" -print-sysroot)")"
 
           "$ARM_GXX" -v -E -x c++ /dev/null 2>&1 |
             tee /tmp/arm-gxx-includes.txt
 
-          ARGS="--target=arm-none-eabi"
-
-          if [ -n "$ARM_SYSROOT" ]; then
-            ARGS="$ARGS --sysroot=$ARM_SYSROOT"
-          fi
+          ARGS="--target=arm-none-eabi --sysroot=$ARM_SYSROOT"
 
           while IFS= read -r include_path; do
             [ -n "$include_path" ] || continue
 
-            # Clang supplies its own compiler builtin headers. Including GCC's
-            # builtin headers can cause incompatible intrinsic or macro errors.
+            # Resolve ../ components before deciding whether this is a GCC
+            # builtin directory or an Arm target-library directory.
+            include_path="$(realpath "$include_path")"
+
+            # Clang provides its own compiler builtin headers.
             case "$include_path" in
-              */lib/gcc/*/include|*/lib/gcc/*/include-fixed)
+              */lib/gcc/arm-none-eabi/*/include|*/lib/gcc/arm-none-eabi/*/include-fixed)
                 continue
                 ;;
             esac
@@ -284,6 +283,7 @@ jobs:
           done
 
           echo "ignore=$IGNORE" >> "$GITHUB_OUTPUT"
+          echo $GITHUB_OUTPUT
 
       - name: Run cpp-linter
         id: linter
