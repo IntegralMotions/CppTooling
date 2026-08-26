@@ -219,13 +219,28 @@ jobs:
           set -euxo pipefail
 
           ARM_GXX="$(command -v arm-none-eabi-g++)"
+          ARM_SYSROOT="$("$ARM_GXX" -print-sysroot)"
+
           "$ARM_GXX" -v -E -x c++ /dev/null 2>&1 |
             tee /tmp/arm-gxx-includes.txt
 
-          ARGS="$EXTRA_TIDY_ARGS"
+          ARGS="--target=arm-none-eabi"
+
+          if [ -n "$ARM_SYSROOT" ]; then
+            ARGS="$ARGS --sysroot=$ARM_SYSROOT"
+          fi
 
           while IFS= read -r include_path; do
             [ -n "$include_path" ] || continue
+
+            # Clang supplies its own compiler builtin headers. Including GCC's
+            # builtin headers can cause incompatible intrinsic or macro errors.
+            case "$include_path" in
+              */lib/gcc/*/include|*/lib/gcc/*/include-fixed)
+                continue
+                ;;
+            esac
+
             ARGS="$ARGS -isystem=$include_path"
           done < <(
             awk '
@@ -238,14 +253,19 @@ jobs:
               }
               found {
                 gsub(/^[ \t]+|[ \t]+$/, "", $0)
-                if ($0 != "" && $0 !~ /^(framework directory)/) {
+                if ($0 != "" && $0 !~ /^\(framework directory\)/) {
                   print
                 }
               }
             ' /tmp/arm-gxx-includes.txt
           )
 
-          echo "args=${ARGS# }" >> "$GITHUB_OUTPUT"
+          if [ -n "$EXTRA_TIDY_ARGS" ]; then
+            ARGS="$ARGS $EXTRA_TIDY_ARGS"
+          fi
+
+          echo "clang-tidy compiler arguments: $ARGS"
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
 
       - name: Prepare lint paths
         id: lint_paths
