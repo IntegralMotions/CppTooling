@@ -240,7 +240,9 @@ jobs:
                 ;;
             esac
 
-            ARGS="$ARGS -isystem=$include_path"
+            # cpp-linter splits extra-args on spaces, so use Clang's joined
+            # -isystem<directory> form instead of the unsupported -isystem=<directory>.
+            ARGS="$ARGS -isystem$include_path"
           done < <(
             awk '
               /#include <...> search starts here:/ {
