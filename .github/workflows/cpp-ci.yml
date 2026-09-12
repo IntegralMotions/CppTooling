@@ -33,6 +33,25 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Configure access to private dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # actions/checkout configures the current repository's GITHUB_TOKEN
+          # as an HTTP authorization header. Remove it so Git can use the
+          # automatic token for private dependencies such as IntegralCoreUtilities.
+          git config --local --unset-all \
+            http.https://github.com/.extraheader || true
+
+          git config --global credential.helper store
+
+          printf 'https://x-access-token:%s@github.com\n' \
+            "$GITHUB_TOKEN" > "$HOME/.git-credentials"
+
+          chmod 600 "$HOME/.git-credentials"
+
       - name: Build
         run: make BUILD_TYPE=${{ matrix.build_type }} build
 
@@ -76,3 +95,7 @@ jobs:
           path: build/test-results.xml
           reporter: java-junit
           fail-on-error: false
+
+      - name: Remove private dependency credentials
+        if: always()
+        run: rm -f "$HOME/.git-credentials"
