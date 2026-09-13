@@ -2,6 +2,10 @@ name: CI
 
 on:
   workflow_call:
+    secrets:
+      DEPENDENCY_TOKEN:
+        description: Token with read access to private dependency repositories
+        required: false
     inputs:
       ignore_tidy:
         description: Paths excluded from clang-tidy
@@ -35,20 +39,19 @@ jobs:
 
       - name: Configure access to private dependencies
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          DEPENDENCY_TOKEN: ${{ secrets.DEPENDENCY_TOKEN || github.token }}
         run: |
           set -euo pipefail
 
-          # actions/checkout configures the current repository's GITHUB_TOKEN
-          # as an HTTP authorization header. Remove it so Git can use the
-          # automatic token for private dependencies such as IntegralCoreUtilities.
+          # Remove checkout's repository-scoped extraheader so Git can use the
+          # caller-provided token for private cross-repository dependencies.
           git config --local --unset-all \
             http.https://github.com/.extraheader || true
 
           git config --global credential.helper store
 
           printf 'https://x-access-token:%s@github.com\n' \
-            "$GITHUB_TOKEN" > "$HOME/.git-credentials"
+            "$DEPENDENCY_TOKEN" > "$HOME/.git-credentials"
 
           chmod 600 "$HOME/.git-credentials"
 
